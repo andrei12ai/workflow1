@@ -1,0 +1,498 @@
+{
+    "Id": "81eee19a-3bd0-4565-a312-ba862d5c0529",
+    "Version": 7,
+    "ReleaseVersion": "10",
+    "DataType": "Panasonic.Workflow.Library.Models.ReusableDataModel, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+    "Steps": [
+        {
+            "Id": "bbac3347-6470-4be1-8cc2-f9805186c249",
+            "Name": "Api Call PM Get Product - BoM Configuration Operation",
+            "NextStepId": "2b9382e0-656e-45ec-8d5c-9e4abfa5d879",
+            "StepType": "Panasonic.Workflow.Library.Steps.ApiCallerStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "OperationName": "\"Get Product Operation\"",
+                "Endpoint": "\"http://panasonic-productmaster-runtime-api-service.smppm.svc.cluster.local/product/byQuery\"",
+                "Method": "\"POST\"",
+                "Body": {
+                    "groupOperator": "And",
+                    "filters": [
+                        {
+                            "groupOperator": "And",
+                            "filters": [
+                                {
+                                    "field": "Attributes.Name",
+                                    "operator": "Equals",
+                                    "value": "ATRC-MODEL"
+                                },
+                                {
+                                    "field": "Attributes.Value",
+                                    "operator": "Contains",
+                                    "@value": "\"| \" + data.CustomPayload.ModelCode + \" |\""
+                                }
+                            ]
+                        },
+                        {
+                            "groupOperator": "And",
+                            "filters": [
+                                {
+                                    "field": "Attributes.Name",
+                                    "operator": "Equals",
+                                    "value": "ATRC-PROCESS"
+                                },
+                                {
+                                    "field": "Attributes.Value",
+                                    "operator": "Equals",
+                                    "@value": "data.CustomPayload.ProcessName"
+                                }
+                            ]
+                        },
+                        {
+                            "groupOperator": "And",
+                            "filters": [
+                                {
+                                    "field": "Attributes.Name",
+                                    "operator": "Equals",
+                                    "value": "ATRC-LINE"
+                                },
+                                {
+                                    "field": "Attributes.Value",
+                                    "operator": "Contains",
+                                    "@value": "\"| \" + data.CustomPayload.LineAssociatedLocation + \" |\""
+                                }
+                            ]
+                        }
+                    ],
+                    "offset": 0,
+                    "limit": 1,
+                    "orderBy": {
+                        "field": "id",
+                        "direction": "DESC"
+                    },
+                    "includeProductInfo": [
+                        "All"
+                    ],
+                    "includeProcessSegmentInfo": [
+                        "All"
+                    ]
+                }
+            },
+            "Outputs": {
+                "GetProductOutcome": "step.Outcome",
+                "ConsumeMaterialPartOutcome": "new [] {}.ToList()"
+            }
+        },
+        {
+            "Id": "2b9382e0-656e-45ec-8d5c-9e4abfa5d879",
+            "Name": "Initial BoM Part Configurator - Consumption",
+            "NextStepId": "cb136def-2200-415c-9ef9-c17c91c593e8",
+            "StepType": "Panasonic.Workflow.Library.Steps.ContextConfiguratorStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "OperationName": "\"Initial BoM Part Context Configurator Operation\"",
+                "JsonPayload": {
+                    "@ProductMainPartsList": "data.GetProductOutcome.items.ToJArrayFromObject().First().processSegments.Where(String(it.name) = \"Mixing\").First().parts.Select(new {it.quantity, it.number}).ToList()",
+                    "@ProductSubstitutePartsList": "data.GetProductOutcome.items.ToJArrayFromObject().First().processSegments.Where(String(it.name) = \"Mixing\").First().parts.Select(new {it.substituteParts.Select(new {parent.quantity, it.number}) as substituteParts} ).SelectMany(it.substituteParts).ToList()",
+                    "@PartMultiplier": "Convert.ToDouble(String(data.GetProductOutcome.items.ToJArrayFromObject().First().bomMultiplier) ?? \"1000\")"
+                }
+            },
+            "Outputs": {
+                "ProductPartsList": "data.ProductMainPartsList.ConcatenateJArray(data.ProductSubstitutePartsList).GroupBy(it.number).Select(g => g.First()).ToList()",
+                "ContractPartsList": "data.CustomPayload.ContractPartsList.ToJArrayFromObject().Where(String(it) != \"\").ToList()"
+            }
+        },
+        {
+            "Id": "cb136def-2200-415c-9ef9-c17c91c593e8",
+            "Name": "Decide Contract Part Iteration - Consumption",
+            "StepType": "Panasonic.Workflow.Library.Steps.DecideStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "OperationName": "\"Decide BoM Part Iteration\""
+            },
+            "SelectNextStep": {
+                "99d398b8-a6be-4c93-b7c6-7750f24e73ba": "data.ContractPartsList.ToJArrayFromObject().Count() > 0",
+                "80cb9aa3-e460-4052-9ca1-e15ff6d89576": "data.ContractPartsList.ToJArrayFromObject().Count() == 0"
+            }
+        },
+        {
+            "Id": "99d398b8-a6be-4c93-b7c6-7750f24e73ba",
+            "Name": "Current Part Configurator - Consumption",
+            "StepType": "Panasonic.Workflow.Library.Steps.ContextConfiguratorStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "8e839434-2553-49cf-8426-feb91200ce7f",
+                    "VirtualOperationName": "Contract Part Iteration Operation"
+                },
+                "OperationName": "\"Current Part Context Configurator Operation\""
+            },
+            "Outputs": {
+                "CurrentPart": "data.ContractPartsList.ToJArrayFromObject().First()",
+                "ContractPartsList": "data.ContractPartsList.ToJArrayFromObject().Skip(1).ToList()"
+            },
+            "SelectNextStep": {
+                "4385a624-4829-4e34-8783-76d3a09658b7": "data.ProductPartsList.ToJArrayFromObject().Where(String(it.number) == data.CurrentPart.ToString()).Count() > 0",
+                "d4d26d60-d000-4699-97e2-f6d270609673": "data.ProductPartsList.ToJArrayFromObject().Where(String(it.number) == data.CurrentPart.ToString()).Count() == 0"
+            }
+        },
+        {
+            "Id": "4385a624-4829-4e34-8783-76d3a09658b7",
+            "Name": "Api Call IM Get Part Consumption Lot - Consumption",
+            "StepType": "Panasonic.Workflow.Library.Steps.ApiCallerStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "8e839434-2553-49cf-8426-feb91200ce7f",
+                    "VirtualOperationName": "Contract Part Iteration Operation"
+                },
+                "OperationName": "\"Get Part Consumption Lot Operation\"",
+                "Endpoint": "\"http://panasonic-inventory-runtime-api-service.smpim.svc.cluster.local/inventory/byQuery\"",
+                "Method": "\"POST\"",
+                "Body": {
+                    "filters": [
+                        {
+                            "field": "partNumber",
+                            "operator": "Equals",
+                            "@value": "data.CurrentPart.ToString()"
+                        },
+                        {
+                            "field": "state",
+                            "operator": "Equals",
+                            "value": "Available"
+                        },
+                        {
+                            "field": "quantity",
+                            "operator": "GreaterThan",
+                            "value": "0"
+                        },
+                        {
+                            "field": "locationName",
+                            "operator": "Equals",
+                            "@value": "data.CustomPayload.MaterialAssociatedLocation"
+                        }
+                    ],
+                    "includeInventoryLinks": false,
+                    "includeGroupAndSlotLinks": false,
+                    "includeTraceAttributes": false,
+                    "includeSegmentAttributes": false,
+                    "includeTimers": false,
+                    "offset": 0,
+                    "limit": 2,
+                    "orderBy": {
+                        "field": "lastCheckInDate",
+                        "direction": "ASC"
+                    }
+                }
+            },
+            "Outputs": {
+                "PartConsumptionLotTotal": "Convert.ToInt32(step.Outcome.total)",
+                "PartConsumptionLotContent": "step.Outcome.items.ToJArrayFromObject().ToList()",
+                "CurrentPartRequiredQuantity": "Convert.ToDouble(data.CustomPayload.RequiredQuantity) * Convert.ToDouble(data.ProductPartsList.ToJArrayFromObject().Where(String(it.number) == data.CurrentPart.ToString()).First().quantity) / Convert.ToDouble(data.PartMultiplier)"
+            },
+            "SelectNextStep": {
+                "ddfa8174-940f-4c4c-9086-ae70d0589954": "Convert.ToInt32(data.PartConsumptionLotTotal) > 0",
+                "ee0b60a8-6afd-4135-a552-71af8810a1de": "Convert.ToInt32(data.PartConsumptionLotTotal) == 0"
+            }
+        },
+        {
+            "Id": "ddfa8174-940f-4c4c-9086-ae70d0589954",
+            "Name": "Decide Required Part Quantity Exists - Consumption",
+            "StepType": "Panasonic.Workflow.Library.Steps.DecideStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "8e839434-2553-49cf-8426-feb91200ce7f",
+                    "VirtualOperationName": "Contract Part Iteration Operation"
+                }
+            },
+            "SelectNextStep": {
+                "7edcfa8f-fcd2-46e1-b54c-30344d49c473": "data.PartConsumptionLotContent.ToJArrayFromObject().ToList().Select(it.availableQuantity).ToList().Sum(Convert.ToInt32(it)) >= Convert.ToInt32(data.CurrentPartRequiredQuantity)",
+                "8edcfa9f-fcd2-46e1-b54c-30354d49c474": "data.PartConsumptionLotContent.ToJArrayFromObject().ToList().Select(it.availableQuantity).ToList().Sum(Convert.ToInt32(it)) < Convert.ToInt32(data.CurrentPartRequiredQuantity)"
+            }
+        },
+        {
+            "Id": "7edcfa8f-fcd2-46e1-b54c-30344d49c473",
+            "Name": "Current Part Quantity Configurator - Consumption",
+            "NextStepId": "32fb11f5-70f3-4b0c-a77e-f1aaf449f15c",
+            "StepType": "Panasonic.Workflow.Library.Steps.ContextConfiguratorStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "8e839434-2553-49cf-8426-feb91200ce7f",
+                    "VirtualOperationName": "Contract Part Iteration Operation"
+                },
+                "OperationName": "\"Current Part Quantity Context Configurator Operation\""
+            },
+            "Outputs":{
+                "ConsumedBody": "iif(Convert.ToDouble(data.PartConsumptionLotContent.ToJArrayFromObject().ToList().First().quantity) >= Convert.ToDouble(data.CurrentPartRequiredQuantity), new [] { new (data.PartConsumptionLotContent.ToJArrayFromObject().ToList().First().serializedId as serializedId, Convert.ToDouble(data.CurrentPartRequiredQuantity) as quantity, data.CustomPayload.MaterialAssociatedLocation as locationName) }.Select(it.ToJToken()).ToList(), new [] { new (data.PartConsumptionLotContent.ToJArrayFromObject().ToList().First().serializedId as serializedId, data.PartConsumptionLotContent.ToJArrayFromObject().ToList().First().quantity as quantity, data.CustomPayload.MaterialAssociatedLocation as locationName), new (data.PartConsumptionLotContent.ToJArrayFromObject().ToList().Last().serializedId as serializedId, Convert.ToDouble(data.CurrentPartRequiredQuantity) - Convert.ToDouble(data.PartConsumptionLotContent.ToJArrayFromObject().ToList().First().quantity)  as quantity, data.CustomPayload.MaterialAssociatedLocation as locationName) }.Select(it.ToJToken()).ToList())"
+            }
+        },
+        {
+            "Id": "32fb11f5-70f3-4b0c-a77e-f1aaf449f15c",
+            "Name": "Api Call IM Post Consume Material - Consumption",
+            "NextStepId": "cb136def-2200-415c-9ef9-c17c91c593e8",
+            "StepType": "Panasonic.Workflow.Library.Steps.ApiCallerStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "8e839434-2553-49cf-8426-feb91200ce7f",
+                    "VirtualOperationName": "Contract Part Iteration Operation"
+                },
+                "OperationName": "\"Material Consumption Operation\"",
+                "Endpoint": "\"http://panasonic-inventory-runtime-api-service.smpim.svc.cluster.local/inventory/consumption\"",
+                "Method": "\"POST\"",
+                "Body": {
+                    "inventory": {
+                        "@serializedId": "data.ObjectId"
+                    },
+                    "traceOnly": false,
+                    "consumedLink": true,
+                    "@consumed": "data.ConsumedBody.ToJArrayFromObject()",
+                    "contextData": {
+                        "@contextDataStation": "data.CustomPayload.EquipmentID",
+                        "@contextDataProcessSegment": "data.CustomPayload.ProcessSegment",
+                        "@contextDataProcessSegmentStatus": "data.CustomPayload.ProcessSegmentStatus",
+                        "@contextDataLocation": "data.CustomPayload.EquipmentID",
+                        "@contextDataWorkFlowStepName": "context.Step.Name",
+                        "@contextDataWorkFlowName": "data.WorkflowDefinitionName",
+                        "@contextDataStartTime": "DateTime.UtcNow.ToString(\"yyyy-MM-ddTHH:mm:ss.ffffffZ\")",
+                        "@contextDataEndTime": "DateTime.UtcNow.ToString(\"yyyy-MM-ddTHH:mm:ss.ffffffZ\")",
+                        "@contextDataUserNames": "new[] {data.CustomPayload.UserID}.ToList()"
+                    }
+                }
+            },
+            "Outputs": {
+                "ConsumeMaterialPartOutcome": "data.ConsumeMaterialPartOutcome.ConcatenateJArray(data.ConsumedBody).ToList()"
+            }
+        },
+        {
+            "Id": "8edcfa9f-fcd2-46e1-b54c-30354d49c474",
+            "Name": "Current Remaining Part Quantity Configurator - Consumption",
+            "NextStepId": "33fb11f6-70f3-4b0c-a77e-f2aaf449f16c",
+            "StepType": "Panasonic.Workflow.Library.Steps.ContextConfiguratorStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "8e839434-2553-49cf-8426-feb91200ce7f",
+                    "VirtualOperationName": "Contract Part Iteration Operation"
+                },
+                "OperationName": "\"Current Part Quantity Context Configurator Operation\""
+            },
+            "Outputs":{
+                "ConsumedBody": "iif(Convert.ToInt32(data.PartConsumptionLotContent.ToJArrayFromObject().Count()) > Convert.ToInt32(1), new [] { new (data.PartConsumptionLotContent.ToJArrayFromObject().ToList().First().serializedId as serializedId, data.PartConsumptionLotContent.ToJArrayFromObject().ToList().First().quantity as quantity, data.CustomPayload.MaterialAssociatedLocation as locationName), new (data.PartConsumptionLotContent.ToJArrayFromObject().ToList().Last().serializedId as serializedId, data.PartConsumptionLotContent.ToJArrayFromObject().ToList().Last().quantity  as quantity, data.CustomPayload.MaterialAssociatedLocation as locationName) }.Select(it.ToJToken()).ToList(), new [] { new (data.PartConsumptionLotContent.ToJArrayFromObject().ToList().First().serializedId as serializedId, data.PartConsumptionLotContent.ToJArrayFromObject().ToList().First().quantity as quantity, data.CustomPayload.MaterialAssociatedLocation as locationName)}.Select(it.ToJToken()).ToList())"
+            }
+        },
+        {
+            "Id": "33fb11f6-70f3-4b0c-a77e-f2aaf449f16c",
+            "Name": "Api Call IM Post Remaining Consume Material - Consumption",
+            "NextStepId": "49b70504-1f74-4eba-8131-d87edeceddab",
+            "StepType": "Panasonic.Workflow.Library.Steps.ApiCallerStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "8e839434-2553-49cf-8426-feb91200ce7f",
+                    "VirtualOperationName": "Contract Part Iteration Operation"
+                },
+                "OperationName": "\"Material Consumption Operation\"",
+                "Endpoint": "\"http://panasonic-inventory-runtime-api-service.smpim.svc.cluster.local/inventory/consumption\"",
+                "Method": "\"POST\"",
+                "Body": {
+                    "inventory": {
+                        "@serializedId": "data.ObjectId"
+                    },
+                    "traceOnly": false,
+                    "consumedLink": true,
+                    "@consumed": "data.ConsumedBody.ToJArrayFromObject()",
+                    "contextData": {
+                        "@contextDataStation": "data.CustomPayload.EquipmentID",
+                        "@contextDataProcessSegment": "data.CustomPayload.ProcessSegment",
+                        "@contextDataProcessSegmentStatus": "data.CustomPayload.ProcessSegmentStatus",
+                        "@contextDataLocation": "data.CustomPayload.EquipmentID",
+                        "@contextDataWorkFlowStepName": "context.Step.Name",
+                        "@contextDataWorkFlowName": "data.WorkflowDefinitionName",
+                        "@contextDataStartTime": "DateTime.UtcNow.ToString(\"yyyy-MM-ddTHH:mm:ss.ffffffZ\")",
+                        "@contextDataEndTime": "DateTime.UtcNow.ToString(\"yyyy-MM-ddTHH:mm:ss.ffffffZ\")",
+                        "@contextDataUserNames": "new[] {data.CustomPayload.UserID}.ToList()"
+                    }
+                }
+            },
+            "Outputs": {
+                "ConsumeMaterialPartOutcome": "data.ConsumeMaterialPartOutcome.ConcatenateJArray(data.ConsumedBody).ToList()"
+            }
+        },
+        {
+            "Id": "d4d26d60-d000-4699-97e2-f6d270609673",
+            "Name": "Part Not Found Message Configuration - Consumption",
+            "NextStepId": "5e6ea99f-e38f-494f-8fc3-6517ed7ed22e",
+            "StepType": "Panasonic.Workflow.Library.Steps.ContextConfiguratorStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "f957e857-473e-460d-bfec-7a259ac6d235",
+                    "VirtualOperationName": "Consumption Notification Operation"
+                },
+                "OperationName": "\"Material Quantity Not Enough Message Configurator Operation\"",
+                "JsonPayload": {
+                    "PartNotFoundMessageSender": {
+                        "@lot": "data.ObjectId.ToString()",
+                        "@part": "data.CurrentPart.ToString()"
+                    }
+                }
+            }
+        },
+        {
+            "Id": "5e6ea99f-e38f-494f-8fc3-6517ed7ed22e",
+            "Name": "Notification Sender Part Not Found - Consumption",
+            "NextStepId": "cb136def-2200-415c-9ef9-c17c91c593e8",
+            "StepType": "Panasonic.Workflow.Library.Steps.MessageSenderStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "f957e857-473e-460d-bfec-7a259ac6d235",
+                    "VirtualOperationName": "Consumption Notification Operation"
+                },
+                "OperationName": "\"Part Not Found Message Sender Operation\"",
+                "Section": "\"NotificationManagementClusterPublisher\"",
+                "Partition": "-1",
+                "Topic": "\"panasonic.notification.coreapp.inbound.topic\"",
+                "Key": {
+                    "MessageType": "Instant",
+                    "EntityType": "Notification"
+                },
+                "Content": {
+                    "CoreApplicationName": "WorkflowManager",
+                    "DisplayName": "Workflow Manager",
+                    "TriggerName": "Mixing - Part Not Found",
+                    "KafkaTopicSource": "",
+                    "@TenantId": "data.TenantId",
+                    "@MessageData": "data.PartNotFoundMessageSender.ObjectSerialize()"
+                }
+            }
+        },
+        {
+            "Id": "49b70504-1f74-4eba-8131-d87edeceddab",
+            "Name": "Material Quantity Not Enough Message Configuration - Consumption",
+            "NextStepId": "5a06b81b-aa31-4d71-96ec-d9219988701c",
+            "StepType": "Panasonic.Workflow.Library.Steps.ContextConfiguratorStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "f957e857-473e-460d-bfec-7a259ac6d235",
+                    "VirtualOperationName": "Consumption Notification Operation"
+                },
+                "OperationName": "\"Material Quantity Not Enough Message Configurator Operation\"",
+                "JsonPayload": {
+                    "MaterialQuantityNotEnoughMessageSender": {
+                        "@lot": "data.ObjectId",
+                        "@part": "data.CurrentPart.ToString()",
+                        "@inventories": "DynDslHelper.JoinElementsToString(data.PartConsumptionLotContent.ToJArrayFromObject().Select(String(it.serializedId)), \",\")",
+                        "@location": "data.CustomPayload.EquipmentID"
+                    }
+                }
+            }
+        },
+        {
+            "Id": "5a06b81b-aa31-4d71-96ec-d9219988701c",
+            "Name": "Notification Sender Material Quantity Not Enough - Consumption",
+            "NextStepId": "cb136def-2200-415c-9ef9-c17c91c593e8",
+            "StepType": "Panasonic.Workflow.Library.Steps.MessageSenderStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "f957e857-473e-460d-bfec-7a259ac6d235",
+                    "VirtualOperationName": "Consumption Notification Operation"
+                },
+                "OperationName": "\"Material Quantity Not Enough Message Sender Operation\"",
+                "Section": "\"NotificationManagementClusterPublisher\"",
+                "Partition": "-1",
+                "Topic": "\"panasonic.notification.coreapp.inbound.topic\"",
+                "Key": {
+                    "MessageType": "Instant",
+                    "EntityType": "Notification"
+                },
+                "Content": {
+                    "CoreApplicationName": "WorkflowManager",
+                    "DisplayName": "Workflow Manager",
+                    "TriggerName": "Mixing - Material Quantity Not Enough",
+                    "KafkaTopicSource": "",
+                    "@TenantId": "data.TenantId",
+                    "@MessageData": "data.MaterialQuantityNotEnoughMessageSender.ObjectSerialize()"
+                }
+            }
+        },
+        {
+            "Id": "ee0b60a8-6afd-4135-a552-71af8810a1de",
+            "Name": "Material Does Not Exist Message Configuration - Consumption",
+            "NextStepId": "d3e695eb-7006-4211-879d-3e39384942b4",
+            "StepType": "Panasonic.Workflow.Library.Steps.ContextConfiguratorStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "f957e857-473e-460d-bfec-7a259ac6d235",
+                    "VirtualOperationName": "Consumption Notification Operation"
+                },
+                "OperationName": "\"Material Does Not Exist Message Configurator Operation\"",
+                "JsonPayload": {
+                    "MaterialDoesNotExistMessageSender": {
+                        "@lot": "data.ObjectId",
+                        "@part": "data.CurrentPart.ToString()",
+                        "@location": "data.CustomPayload.EquipmentID"
+                    }
+                }
+            }
+        },
+        {
+            "Id": "d3e695eb-7006-4211-879d-3e39384942b4",
+            "Name": "Notification Sender Material Does Not Exist - Consumption",
+            "NextStepId": "cb136def-2200-415c-9ef9-c17c91c593e8",
+            "StepType": "Panasonic.Workflow.Library.Steps.MessageSenderStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "DynamicInput": {
+                    "VirtualOperationId": "f957e857-473e-460d-bfec-7a259ac6d235",
+                    "VirtualOperationName": "Consumption Notification Operation"
+                },
+                "OperationName": "\"Material Does Not Exist Message Sender Operation\"",
+                "Section": "\"NotificationManagementClusterPublisher\"",
+                "Partition": "-1",
+                "Topic": "\"panasonic.notification.coreapp.inbound.topic\"",
+                "Key": {
+                    "MessageType": "Instant",
+                    "EntityType": "Notification"
+                },
+                "Content": {
+                    "CoreApplicationName": "WorkflowManager",
+                    "DisplayName": "Workflow Manager",
+                    "TriggerName": "Mixing - Material Does Not Exist",
+                    "KafkaTopicSource": "",
+                    "@TenantId": "data.TenantId",
+                    "@MessageData": "data.MaterialDoesNotExistMessageSender.ObjectSerialize()"
+                }
+            }
+        },
+        {
+            "Id": "80cb9aa3-e460-4052-9ca1-e15ff6d89576",
+            "Name": "Message Sender Consumption End Configuration - Consumption End",
+            "NextStepId": "b1a02bd5-3669-4821-8439-8a164a9a6612",
+            "StepType": "Panasonic.Workflow.Library.Steps.ContextConfiguratorStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "OperationName": "\"Consumption End Message Configurator Operation\"",
+                "JsonPayload": {
+                  "ConsumptionEndMessageSender": {
+                    "@WorkflowInstanceId": "isnull(data.CustomPayload.OriginWorkflowInstanceId, \"\")",
+                    "@ObjectId": "data.ObjectId",
+                    "@ObjectType": "data.ObjectType",
+                    "@WorkflowDefinitionId": "data.CustomPayload.OriginWorkflowDefinitionId",
+                    "@Version": "data.CustomPayload.OriginWorkflowVersion",
+                    "triggerParameters": "{\"ForbidExistingInstanceStatuses\":[\"Runnable\"]}",
+                    "@StepName": "data.CustomPayload.OriginStepName",
+                    "@EventName": "data.CustomPayload.OriginEventName",
+                    "EventData": {
+                      "@ConsumedMaterials": "data.ConsumeMaterialPartOutcome"
+                    }
+                  }
+                }
+            }
+        },
+        {
+            "Id": "b1a02bd5-3669-4821-8439-8a164a9a6612",
+            "Name": "Message Sender Consumption End - Consumption End",
+            "StepType": "Panasonic.Workflow.Library.Steps.MessageSenderStep, Panasonic.Workflow.Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+            "Inputs": {
+                "Section": "\"WorkflowRuntimeClusterPublisher0\"",
+                "Partition": "-1",
+                "Topic": "\"panasonic.workflow.runtime.waitforevent.topic\"",
+                "Key": {
+                    "@Id": "data.ObjectId",
+                    "MessageType": "Instant",
+                    "EntityType": "WorkflowWaitForEvent"
+                },
+                "Content": "data.ConsumptionEndMessageSender"
+            }
+        }
+    ]
+}
